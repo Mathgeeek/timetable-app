@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import dynamic from 'next/dynamic';
+import { parseScheduleFile } from '@/lib/parseSchedule';
 
 // 💡 전역에서 공통으로 사용할 유닛 타입 정의
 interface TeacherUnit {
@@ -19,67 +20,90 @@ const DashboardPage = dynamic(() => import('@/app/components/DashboardPage'), {
   loading: () => <div className="min-h-screen bg-slate-950 text-slate-400 p-8">대시보드 로딩 중...</div>
 });
 
-// 메뉴 네비게이션 상태 타입
 type MenuState = 'CONFIG_PANEL' | 'START_TIMETABLE';
 
 export default function RootMainPage() {
   const [isMounted, setIsMounted] = useState(false);
   const [activeMenu, setActiveMenu] = useState<MenuState>('CONFIG_PANEL');
-  
-  // 💡 [핵심] 업로드된 엑셀 유닛 데이터가 저장될 '어딘가' (부모 상태)
   const [globalUnits, setGlobalUnits] = useState<TeacherUnit[]>([]);
-  
-  // 파일 탐색기를 프론트엔드 버튼과 연결하기 위한 훅
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setIsMounted(true);
   }, []);
 
-  // 카드 클릭 시 파일 탐색기를 강제로 여는 함수
   const triggerFileBrowser = () => {
     fileInputRef.current?.click();
   };
 
-  // 💡 사용자가 파일을 선택했을 때 실행되는 함수 (추후 팀원 B의 xlsx 파싱 로직이 여기 합쳐집니다!)
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // ✅ handleFileChange 함수 — 열고 닫힘이 정확함
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // [임시 알림] 파일명이 정상적으로 찍히는지 확인
-    alert(`[파일 감지] ${file.name} 시수표를 분석합니다.`);
+    const result = await parseScheduleFile(file);
 
-    // ──────────────────────────────────────────────────────────
-    // ✨ [WEEKEND STEP] 일요일에 팀원 B가 짠 xlsx 코드가 들어올 자리
-    // ──────────────────────────────────────────────────────────
-    // 지금은 연동 테스트를 위해 올려주신 시수표 기반의 데이터 블록 4개가 파싱되었다고 가정합니다.
-    const mockParsedFromExcel: TeacherUnit[] = [
-      { id: 'excel-1', name: '배부신', subject: '국어', grade: 1, classNum: 1, totalHours: 3, color: 'border-blue-500 text-blue-400 bg-blue-500/10' },
-      { id: 'excel-2', name: '배부신', subject: '국어', grade: 1, classNum: 2, totalHours: 3, color: 'border-blue-500 text-blue-400 bg-blue-500/10' },
-      { id: 'excel-3', name: '홍예원', subject: '공통수학 I', grade: 1, classNum: 1, totalHours: 4, color: 'border-emerald-500 text-emerald-400 bg-emerald-500/10' },
-      { id: 'excel-4', name: '홍예원', subject: '공통수학 I', grade: 1, classNum: 2, totalHours: 4, color: 'border-emerald-500 text-emerald-400 bg-emerald-500/10' },
-      { id: 'excel-5', name: '박범석', subject: '공통수학 I', grade: 1, classNum: 5, totalHours: 4, color: 'border-purple-500 text-purple-400 bg-purple-500/10' },
+    if (!result.success) {
+      alert(`파싱 오류: ${result.error}`);
+      return;
+    }
+
+    const COLORS = [
+      'border-blue-500 text-blue-400 bg-blue-500/10',
+      'border-emerald-500 text-emerald-400 bg-emerald-500/10',
+      'border-purple-500 text-purple-400 bg-purple-500/10',
+      'border-amber-500 text-amber-400 bg-amber-500/10',
+      'border-rose-500 text-rose-400 bg-rose-500/10',
+      'border-cyan-500 text-cyan-400 bg-cyan-500/10',
+      'border-indigo-500 text-indigo-400 bg-indigo-500/10',
+      'border-orange-500 text-orange-400 bg-orange-500/10',
     ];
+    const teacherColorMap: Record<string, string> = {};
+    let colorIndex = 0;
+    const units: TeacherUnit[] = [];
 
-    setGlobalUnits(mockParsedFromExcel);
-    alert(`성공적으로 교사 시수 블록들이 생성되어 시스템에 저장되었습니다!\n왼쪽 사이드바의 [기초시간표 작성 시작] 메뉴가 활성화됩니다.`);
-  };
+    for (const row of result.data) {
+      if (!teacherColorMap[row.teacherName]) {
+        teacherColorMap[row.teacherName] = COLORS[colorIndex % COLORS.length];
+        colorIndex++;
+      }
+      const color = teacherColorMap[row.teacherName];
+
+      for (const gradeKey of ['grade1', 'grade2', 'grade3'] as const) {
+        const gradeNum = gradeKey === 'grade1' ? 1 : gradeKey === 'grade2' ? 2 : 3;
+        const gradeHours = row.hours[gradeKey];
+        for (const [classNum, hours] of Object.entries(gradeHours)) {
+          units.push({
+            id: `${row.index}-${gradeNum}-${classNum}`,
+            name: row.teacherName,
+            subject: row.subjectFull,
+            grade: gradeNum,
+            classNum: Number(classNum),
+            totalHours: hours,
+            color,
+          });
+        }
+      }
+    }
+
+    setGlobalUnits(units);
+    alert(`✅ ${result.meta.totalRows}명의 교사, ${units.length}개 유닛 생성 완료!`);
+  }; // ← 여기서 함수 닫힘
 
   if (!isMounted) return <div className="min-h-screen bg-slate-950 text-slate-400 p-8">로딩 중...</div>;
 
   return (
     <div className="flex h-screen w-full bg-slate-950 text-slate-100 font-sans overflow-hidden select-none">
-      
-      {/* 💡 숨겨진 실제 파일 브라우저 인풋 */}
-      <input 
-        type="file" 
-        ref={fileInputRef} 
-        onChange={handleFileChange} 
-        accept=".xlsx, .xls" 
-        className="hidden" 
+
+      <input
+        type="file"
+        ref={fileInputRef}
+        onChange={handleFileChange}
+        accept=".xlsx, .xls"
+        className="hidden"
       />
 
-      {/* ================= 1. 좌측 메인 내비게이션 사이드바 ================= */}
+      {/* 좌측 사이드바 */}
       <aside className="w-72 border-r border-slate-800 bg-slate-900/40 p-6 flex flex-col gap-6 backdrop-blur-md">
         <div className="mb-2">
           <h1 className="text-lg font-bold tracking-tight bg-linear-to-r from-amber-400 to-orange-400 bg-clip-text text-transparent">
@@ -88,7 +112,6 @@ export default function RootMainPage() {
           <p className="text-xxs text-slate-500 mt-0.5">Tauri 관리자 콘솔 v1.0</p>
         </div>
 
-        {/* 메인 메뉴 버튼 그룹 */}
         <div className="flex flex-col gap-3 flex-1">
           <button
             onClick={() => setActiveMenu('CONFIG_PANEL')}
@@ -101,7 +124,6 @@ export default function RootMainPage() {
             기초시간표 설정 메뉴
           </button>
 
-          {/* 💡 [원하셨던 핵심 기능] 엑셀이 업로드되면 이 버튼을 눌러 대시보드로 진입합니다 */}
           <button
             onClick={() => setActiveMenu('START_TIMETABLE')}
             className={`w-full p-4 rounded-xl text-left text-sm font-bold transition-all duration-200 border cursor-pointer flex justify-between items-center ${
@@ -130,10 +152,9 @@ export default function RootMainPage() {
         </div>
       </aside>
 
-      {/* ================= 2. 우측 메인 콘텐츠 영역 ================= */}
+      {/* 우측 콘텐츠 */}
       <main className="flex-1 p-8 flex flex-col overflow-hidden relative">
-        
-        {/* [화면 1] 4대 카드 판넬 메뉴 */}
+
         {activeMenu === 'CONFIG_PANEL' && (
           <div className="flex-1 flex flex-col justify-center max-w-5xl w-full mx-auto animate-fadeIn">
             <div className="mb-8">
@@ -148,12 +169,11 @@ export default function RootMainPage() {
                 <p className="text-xs text-slate-500 mt-2">표준 템플릿 파일 획득</p>
               </div>
 
-              {/* 💡 [수정] 클릭 시 파일 탐색기를 강제 구동하도록 설계 변경 */}
-              <div 
+              <div
                 onClick={triggerFileBrowser}
                 className={`h-48 border rounded-2xl p-6 flex flex-col justify-center items-center text-center cursor-pointer transition-all duration-300 group ${
-                  globalUnits.length > 0 
-                    ? 'bg-emerald-950/20 border-emerald-500/40 hover:bg-emerald-950/40' 
+                  globalUnits.length > 0
+                    ? 'bg-emerald-950/20 border-emerald-500/40 hover:bg-emerald-950/40'
                     : 'bg-slate-900/40 border-slate-800 hover:bg-slate-900/80 hover:border-amber-500/50 shadow-md'
                 }`}
               >
@@ -181,7 +201,6 @@ export default function RootMainPage() {
           </div>
         )}
 
-        {/* [화면 2] 대시보드 조립판 메뉴 (업로드한 전역 데이터를 props로 실어 보냄) */}
         {activeMenu === 'START_TIMETABLE' && (
           <div className="w-full h-full flex flex-col animate-fadeIn">
             <DashboardPage units={globalUnits} />

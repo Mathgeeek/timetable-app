@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { parseScheduleFile } from '@/lib/parseSchedule';
 
 interface TeacherUnit {
   id: string;
