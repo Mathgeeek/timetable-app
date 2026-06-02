@@ -1,195 +1,304 @@
 /**
- * 대한미국 중고등학교 시수배당표 파서
- * 파일: 2026년_1학기_시수배당표_0223.xlsx
- * 시트: 교사별시수표
+ * 교사별 시수배당표 파서
+ * - 한컴 한셀(HCell)에서 저장한 xlsx 호환 처리 추가:
+ *   한셀은 sharedStrings 등에 표준이 아닌 hs: 네임스페이스 확장 태그를 끼워 넣는데,
+ *   SheetJS가 이 태그에서 시트 본문 파싱에 실패해 workbook.Sheets가 비어버린다.
+ *   => 1차로 그냥 읽어보고, 시트 본문이 비어있으면 hs: 태그를 제거한 뒤 재시도한다.
  *
- * 컬럼 구조:
- *   [0] 순번
- *   [1] 정식과목명
- *   [2] 단축과목명
- *   [3] 교사명
- *   [4~15]  1학년 1~12반 시수
- *   [16~27] 2학년 1~12반 시수
- *   [28~39] 3학년 1~12반 시수
- *   [40]    계 (합계)
+ *   추가 의존성: fflate (xlsx 압축 해제/재압축용)
+ *   설치:  npm install fflate
  */
 
 import * as XLSX from "xlsx";
-
-// ─── 타입 정의 ────────────────────────────────────────────────
+import { unzipSync, zipSync, strToU8, strFromU8 } from "fflate";
 
 export interface ClassHours {
-  [classNum: number]: number; // 1~12반
+  [classNum: number]: number;
 }
 
 export interface ScheduleRow {
-  /** 순번 (1-based) */
   index: number;
-  /** 정식 과목명 (예: 공통국어1) */
   subjectFull: string;
-  /** 단축 과목명 (예: 국어) */
   subjectShort: string;
-  /** 교사명 */
   teacherName: string;
-  /** 학년별 반별 시수 */
   hours: {
     grade1: ClassHours;
     grade2: ClassHours;
     grade3: ClassHours;
   };
-  /** 총 시수 합계 */
   total: number;
 }
 
+interface GradeColumnMap {
+  [grade: number]: { [classNum: number]: number };
+}
+
 export interface ParseResult {
-  /** 파싱 성공 여부 */
   success: boolean;
-  /** 파싱된 데이터 */
   data: ScheduleRow[];
-  /** 에러 메시지 (실패 시) */
   error?: string;
-  /** 메타 정보 */
   meta: {
     totalRows: number;
     sheetName: string;
     uniqueSubjects: string[];
     uniqueTeachers: string[];
+    classCountByGrade: { [grade: number]: number };
   };
 }
 
-// ─── 헬퍼 ──────────────────────────────────────────────────────
-
-/**
- * 셀 값을 숫자로 변환. 빈 셀이나 비숫자는 0 반환.
- */
 function toNum(value: unknown): number {
   if (value === null || value === undefined || value === "") return 0;
   const n = Number(value);
   return isNaN(n) ? 0 : n;
 }
 
-/**
- * 셀 값을 문자열로 변환. 빈 셀은 빈 문자열 반환.
- */
 function toStr(value: unknown): string {
   if (value === null || value === undefined) return "";
   return String(value).trim();
 }
 
 /**
- * 반(1~12)별 시수 객체 생성
- * @param row  XLSX 행 배열
- * @param startCol  첫 번째 반이 들어있는 컬럼 인덱스
+ * 한컴 한셀(HCell)이 끼워 넣는 비표준 hs: 네임스페이스 태그/속성을 제거한다.
+ * (예: <hs:size val="1"/>, <hs:ratio .../>, hs:extension="1" 등)
+ * 표준 Excel 파일에는 hs: 태그가 없으므로 사실상 무해한 통과 처리가 된다.
  */
-function extractClassHours(
+function sanitizeHancomXlsx(arrayBuffer: ArrayBuffer): ArrayBuffer {
+  const files = unzipSync(new Uint8Array(arrayBuffer));
+  const out: Record<string, Uint8Array> = {};
+  for (const [name, data] of Object.entries(files)) {
+    if (name.endsWith(".xml")) {
+      let xml = strFromU8(data);
+      xml = xml
+        // <hs:foo .../>  형태의 자가 종료 태그 제거
+        .replace(/<hs:[a-zA-Z0-9]+\b[^>]*\/>/g, "")
+        // <hs:foo ...>...</hs:foo> 형태의 짝 태그 제거(안전망)
+        .replace(/<hs:[a-zA-Z0-9]+\b[^>]*>[\s\S]*?<\/hs:[a-zA-Z0-9]+>/g, "")
+        // hs:extension="1" 같은 hs: 속성 제거
+        .replace(/\shs:[a-zA-Z0-9]+="[^"]*"/g, "");
+      out[name] = strToU8(xml);
+    } else {
+      out[name] = data;
+    }
+  }
+  // SharedArrayBuffer 가능성을 피하기 위해 명시적으로 ArrayBuffer 로 복사해 반환
+  const zipped = zipSync(out);
+  return zipped.buffer.slice(
+    zipped.byteOffset,
+    zipped.byteOffset + zipped.byteLength
+  ) as ArrayBuffer;
+}
+
+/**
+ * 워크북을 견고하게 읽는다.
+ * 1) 우선 그대로 읽는다.
+ * 2) 예외가 나거나 시트 본문(Sheets)이 비어 있으면 한셀 태그를 제거하고 재시도한다.
+ */
+function readWorkbookResilient(arrayBuffer: ArrayBuffer): XLSX.WorkBook {
+  let wb: XLSX.WorkBook | null = null;
+  try {
+    wb = XLSX.read(arrayBuffer, { type: "array" });
+  } catch {
+    wb = null;
+  }
+
+  const looksEmpty =
+    !wb || wb.SheetNames.length === 0 || Object.keys(wb.Sheets).length === 0;
+
+  if (looksEmpty) {
+    const cleaned = sanitizeHancomXlsx(arrayBuffer);
+    wb = XLSX.read(cleaned, { type: "array" });
+  }
+
+  return wb!;
+}
+
+/**
+ * 헤더를 읽어 학년별 컬럼 매핑과 "계" 열 위치를 자동 감지.
+ */
+function detectStructure(
+  gradeRow: unknown[],
+  classRow: unknown[]
+): { map: GradeColumnMap; totalCol: number | null } {
+  const map: GradeColumnMap = {};
+  let totalCol: number | null = null;
+  const gradeStarts: { grade: number; col: number }[] = [];
+
+  // 1. "계" 열 위치 검색 (포함 검사 및 트림)
+  for (let c = 0; c < gradeRow.length; c++) {
+    const label = toStr(gradeRow[c]);
+    if (label.includes("계") || label.includes("합계") || label.includes("총계")) {
+      totalCol = c;
+      break;
+    }
+  }
+
+  // 2. 학년 라벨 수집 (셀 병합 대응)
+  let lastSeenGrade = 0;
+  for (let c = 0; c < gradeRow.length; c++) {
+    if (totalCol !== null && c >= totalCol) break;
+
+    const label = toStr(gradeRow[c]);
+    const gm = label.match(/^([123])\s*학년/);
+
+    if (gm) {
+      const currentGrade = Number(gm[1]);
+      if (currentGrade !== lastSeenGrade) {
+        gradeStarts.push({ grade: currentGrade, col: c });
+        lastSeenGrade = currentGrade;
+      }
+    }
+  }
+
+  // 3. 각 학년별 반 번호 매핑 생성
+  for (let i = 0; i < gradeStarts.length; i++) {
+    const { grade, col } = gradeStarts[i];
+    const nextCol =
+      i + 1 < gradeStarts.length
+        ? gradeStarts[i + 1].col
+        : totalCol !== null
+        ? totalCol
+        : classRow.length;
+
+    const classes: { [classNum: number]: number } = {};
+    for (let c = col; c < nextCol; c++) {
+      const cn = toNum(classRow[c]);
+      if (cn > 0) {
+        classes[cn] = c;
+      }
+    }
+    map[grade] = classes;
+  }
+
+  return { map, totalCol };
+}
+
+function extractHours(
   row: unknown[],
-  startCol: number
+  classMap: { [classNum: number]: number }
 ): ClassHours {
   const hours: ClassHours = {};
-  for (let classNum = 1; classNum <= 12; classNum++) {
-    const val = toNum(row[startCol + classNum - 1]);
-    if (val > 0) {
-      hours[classNum] = val;
-    }
+  if (!classMap) return hours;
+  for (const [classNumStr, col] of Object.entries(classMap)) {
+    const val = toNum(row[col]);
+    if (val > 0) hours[Number(classNumStr)] = val;
   }
   return hours;
 }
 
-// ─── 메인 파서 ─────────────────────────────────────────────────
+function emptyMeta() {
+  return {
+    totalRows: 0,
+    sheetName: "",
+    uniqueSubjects: [] as string[],
+    uniqueTeachers: [] as string[],
+    classCountByGrade: { 1: 0, 2: 0, 3: 0 },
+  };
+}
 
-/**
- * 브라우저 File 객체 또는 Node.js Buffer/ArrayBuffer를 받아 파싱합니다.
- *
- * @example (브라우저 — Next.js 클라이언트 컴포넌트)
- * ```ts
- * const file = event.target.files[0];
- * const result = await parseScheduleFile(file);
- * ```
- *
- * @example (Next.js API Route — Node.js 서버)
- * ```ts
- * import fs from "fs";
- * const buffer = fs.readFileSync("./file.xlsx");
- * const result = await parseScheduleFile(buffer);
- * ```
- */
 export async function parseScheduleFile(
   input: File | Buffer | ArrayBuffer
 ): Promise<ParseResult> {
   try {
-    // 1. 입력을 ArrayBuffer로 통일
     let arrayBuffer: ArrayBuffer;
-
     if (input instanceof File) {
       arrayBuffer = await input.arrayBuffer();
-    } else if (Buffer.isBuffer(input)) {
-      // Node.js Buffer → ArrayBuffer
+    } else if (typeof Buffer !== "undefined" && Buffer.isBuffer(input)) {
       arrayBuffer = input.buffer.slice(
         input.byteOffset,
         input.byteOffset + input.byteLength
       ) as ArrayBuffer;
     } else {
-      arrayBuffer = input;
+      arrayBuffer = input as ArrayBuffer;
     }
 
-    // 2. XLSX 워크북 파싱
-    const workbook = XLSX.read(arrayBuffer, { type: "array" });
+    // ✅ 한셀(HCell) 호환: 필요 시 hs: 태그 제거 후 재시도
+    const workbook = readWorkbookResilient(arrayBuffer);
 
-    // 3. 시트 선택 (첫 번째 시트 또는 '교사별시수표')
+    // 시트 이름 유연하게 획득
     const sheetName =
-      workbook.SheetNames.includes("교사별시수표")
-        ? "교사별시수표"
-        : workbook.SheetNames[0];
+      workbook.SheetNames.find(
+        (name) => name.includes("교사별") || name.includes("시수")
+      ) || workbook.SheetNames[0];
 
     const worksheet = workbook.Sheets[sheetName];
+
     if (!worksheet) {
       return {
         success: false,
         data: [],
-        error: `시트를 찾을 수 없습니다. 사용 가능한 시트: ${workbook.SheetNames.join(", ")}`,
-        meta: { totalRows: 0, sheetName: "", uniqueSubjects: [], uniqueTeachers: [] },
+        error: `시트를 찾을 수 없습니다. 사용 가능한 시트 목록: ${workbook.SheetNames.join(
+          ", "
+        )}`,
+        meta: emptyMeta(),
       };
     }
 
-    // 4. 시트를 2D 배열로 변환 (헤더 없이 raw 배열)
     const rows: unknown[][] = XLSX.utils.sheet_to_json(worksheet, {
-      header: 1,        // 1-based 컬럼 인덱스 배열 반환
-      defval: "",       // 빈 셀 기본값
-      blankrows: false, // 완전히 빈 행 제외
+      header: 1,
+      defval: "",
+      blankrows: false,
     });
 
-    /**
-     * 실제 데이터 행 필터링 조건:
-     *  - [0]이 숫자 (순번)
-     *  - [1]이 문자열 (과목명)
-     *  - [3]이 문자열 (교사명)
-     */
-    const dataRows = rows.filter((row) => {
-      const idx = toNum(row[0]);
+    // 학년 라벨 행 자동 탐색
+    let gradeRowIdx = -1;
+    for (let r = 0; r < Math.min(rows.length, 6); r++) {
+      const hasGradeLabel = rows[r].some((cell) =>
+        /^[123]\s*학년/.test(toStr(cell))
+      );
+      if (hasGradeLabel) {
+        gradeRowIdx = r;
+        break;
+      }
+    }
+
+    if (gradeRowIdx === -1 || gradeRowIdx + 1 >= rows.length) {
+      return {
+        success: false,
+        data: [],
+        error:
+          "학년 헤더('1학년','2학년','3학년')를 찾지 못했습니다. 표준 양식을 사용했는지 확인해 주세요.",
+        meta: emptyMeta(),
+      };
+    }
+
+    const { map, totalCol } = detectStructure(
+      rows[gradeRowIdx],
+      rows[gradeRowIdx + 1]
+    );
+
+    const dataStartIdx = gradeRowIdx + 2;
+    const dataRows = rows.slice(dataStartIdx).filter((row) => {
+      const firstCell = row[0];
       const subject = toStr(row[1]);
       const teacher = toStr(row[3]);
-      return idx > 0 && subject.length > 0 && teacher.length > 0;
+
+      // 순번 셀이 숫자/문자 타입이든 존재만 하면 통과
+      if (firstCell === null || firstCell === undefined || firstCell === "")
+        return false;
+
+      const idxStr = toStr(firstCell);
+      // '예) 1' 같은 가이드 행 및 과목/교사명 누락 행 차단
+      return !idxStr.includes("예") && subject.length > 0 && teacher.length > 0;
     });
 
-    // 5. 각 행을 ScheduleRow로 변환
-    const parsed: ScheduleRow[] = dataRows.map((row) => {
-      return {
-        index: toNum(row[0]),
-        subjectFull: toStr(row[1]),
-        subjectShort: toStr(row[2]),
-        teacherName: toStr(row[3]),
-        hours: {
-          grade1: extractClassHours(row, 4),   // 컬럼 4~15
-          grade2: extractClassHours(row, 16),  // 컬럼 16~27
-          grade3: extractClassHours(row, 28),  // 컬럼 28~39
-        },
-        total: toNum(row[40]),
-      };
-    });
+    const parsed: ScheduleRow[] = dataRows.map((row) => ({
+      index: toNum(row[0]),
+      subjectFull: toStr(row[1]),
+      subjectShort: toStr(row[2]),
+      teacherName: toStr(row[3]),
+      hours: {
+        grade1: extractHours(row, map[1] || {}),
+        grade2: extractHours(row, map[2] || {}),
+        grade3: extractHours(row, map[3] || {}),
+      },
+      total: totalCol !== null ? toNum(row[totalCol]) : 0,
+    }));
 
-    // 6. 메타 정보 생성
-    const uniqueSubjects = [...new Set(parsed.map((r) => r.subjectFull))];
-    const uniqueTeachers = [...new Set(parsed.map((r) => r.teacherName))];
+    const classCountByGrade: { [grade: number]: number } = {
+      1: Object.keys(map[1] || {}).length || 12,
+      2: Object.keys(map[2] || {}).length || 12,
+      3: Object.keys(map[3] || {}).length || 12,
+    };
 
     return {
       success: true,
@@ -197,8 +306,9 @@ export async function parseScheduleFile(
       meta: {
         totalRows: parsed.length,
         sheetName,
-        uniqueSubjects,
-        uniqueTeachers,
+        uniqueSubjects: [...new Set(parsed.map((r) => r.subjectFull))],
+        uniqueTeachers: [...new Set(parsed.map((r) => r.teacherName))],
+        classCountByGrade,
       },
     };
   } catch (err) {
@@ -206,16 +316,11 @@ export async function parseScheduleFile(
       success: false,
       data: [],
       error: err instanceof Error ? err.message : "알 수 없는 오류가 발생했습니다.",
-      meta: { totalRows: 0, sheetName: "", uniqueSubjects: [], uniqueTeachers: [] },
+      meta: emptyMeta(),
     };
   }
 }
 
-// ─── 편의 유틸리티 함수들 ──────────────────────────────────────
-
-/**
- * 특정 과목의 모든 행을 조회합니다.
- */
 export function filterBySubject(
   data: ScheduleRow[],
   subjectName: string
@@ -227,73 +332,9 @@ export function filterBySubject(
   );
 }
 
-/**
- * 특정 교사의 모든 행을 조회합니다.
- */
 export function filterByTeacher(
   data: ScheduleRow[],
   teacherName: string
 ): ScheduleRow[] {
   return data.filter((row) => row.teacherName === teacherName);
-}
-
-/**
- * 특정 학년의 반별 시수 집계를 반환합니다.
- * @param grade 1 | 2 | 3
- */
-export function getGradeSummary(
-  data: ScheduleRow[],
-  grade: 1 | 2 | 3
-): Record<string, ClassHours> {
-  const key = `grade${grade}` as "grade1" | "grade2" | "grade3";
-  const summary: Record<string, ClassHours> = {};
-
-  for (const row of data) {
-    const gradeHours = row.hours[key];
-    if (!summary[row.subjectFull]) {
-      summary[row.subjectFull] = {};
-    }
-    for (const [classNum, hours] of Object.entries(gradeHours)) {
-      const cn = Number(classNum);
-      summary[row.subjectFull][cn] =
-        (summary[row.subjectFull][cn] ?? 0) + hours;
-    }
-  }
-
-  return summary;
-}
-
-/**
- * 반별 총 시수가 특정 값인지 검증합니다 (보통 30시수).
- * @returns 이상이 있는 반 목록
- */
-export function validateTotalHours(
-  data: ScheduleRow[],
-  expectedHoursPerClass: number = 30
-): { grade: number; classNum: number; actual: number }[] {
-  const errors: { grade: number; classNum: number; actual: number }[] = [];
-
-  for (const gradeNum of [1, 2, 3] as const) {
-    const key = `grade${gradeNum}` as "grade1" | "grade2" | "grade3";
-    const totals: Record<number, number> = {};
-
-    for (const row of data) {
-      for (const [classNum, hours] of Object.entries(row.hours[key])) {
-        const cn = Number(classNum);
-        totals[cn] = (totals[cn] ?? 0) + hours;
-      }
-    }
-
-    for (const [classNum, total] of Object.entries(totals)) {
-      if (total !== expectedHoursPerClass) {
-        errors.push({
-          grade: gradeNum,
-          classNum: Number(classNum),
-          actual: total,
-        });
-      }
-    }
-  }
-
-  return errors;
 }

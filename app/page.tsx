@@ -4,7 +4,6 @@ import React, { useState, useEffect, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import { parseScheduleFile } from '@/lib/parseSchedule';
 
-// 💡 전역에서 공통으로 사용할 유닛 타입 정의
 interface TeacherUnit {
   id: string;
   name: string;
@@ -26,6 +25,7 @@ export default function RootMainPage() {
   const [isMounted, setIsMounted] = useState(false);
   const [activeMenu, setActiveMenu] = useState<MenuState>('CONFIG_PANEL');
   const [globalUnits, setGlobalUnits] = useState<TeacherUnit[]>([]);
+  const [classCount, setClassCount] = useState<{ [grade: number]: number }>({ 1: 12, 2: 12, 3: 12 });
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -36,7 +36,16 @@ export default function RootMainPage() {
     fileInputRef.current?.click();
   };
 
-  // ✅ handleFileChange 함수 — 열고 닫힘이 정확함
+  // 표준 양식 다운로드
+  const downloadTemplate = () => {
+    const link = document.createElement('a');
+    link.href = '/schedule-template.xlsx';
+    link.download = '교사별_시수표_표준양식.xlsx';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -87,8 +96,9 @@ export default function RootMainPage() {
     }
 
     setGlobalUnits(units);
+    setClassCount(result.meta.classCountByGrade);
     alert(`✅ ${result.meta.totalRows}명의 교사, ${units.length}개 유닛 생성 완료!`);
-  }; // ← 여기서 함수 닫힘
+  };
 
   if (!isMounted) return <div className="min-h-screen bg-slate-950 text-slate-400 p-8">로딩 중...</div>;
 
@@ -106,10 +116,10 @@ export default function RootMainPage() {
       {/* 좌측 사이드바 */}
       <aside className="w-72 border-r border-slate-800 bg-slate-900/40 p-6 flex flex-col gap-6 backdrop-blur-md">
         <div className="mb-2">
-          <h1 className="text-lg font-bold tracking-tight bg-linear-to-r from-amber-400 to-orange-400 bg-clip-text text-transparent">
+          <h1 className="text-lg font-bold tracking-tight bg-gradient-to-r from-amber-400 to-orange-400 bg-clip-text text-transparent">
             시간표 일과 마스터
           </h1>
-          <p className="text-xxs text-slate-500 mt-0.5">Tauri 관리자 콘솔 v1.0</p>
+          <p className="text-xs text-slate-500 mt-0.5">관리자 콘솔 v1.0</p>
         </div>
 
         <div className="flex flex-col gap-3 flex-1">
@@ -134,7 +144,7 @@ export default function RootMainPage() {
           >
             <span>✨ 기초시간표 작성 시작</span>
             {globalUnits.length > 0 && (
-              <span className="bg-amber-500 text-slate-950 text-xxs px-2 py-0.5 rounded-full font-extrabold animate-pulse">
+              <span className="bg-amber-500 text-slate-950 text-xs px-2 py-0.5 rounded-full font-extrabold animate-pulse">
                 {globalUnits.length}개 유닛 로드됨
               </span>
             )}
@@ -147,7 +157,7 @@ export default function RootMainPage() {
           ))}
         </div>
 
-        <div className="text-xxs text-slate-600 text-center border-t border-slate-950 pt-4">
+        <div className="text-xs text-slate-600 text-center border-t border-slate-950 pt-4">
           행정망 보안 세션 활성화됨
         </div>
       </aside>
@@ -156,14 +166,14 @@ export default function RootMainPage() {
       <main className="flex-1 p-8 flex flex-col overflow-hidden relative">
 
         {activeMenu === 'CONFIG_PANEL' && (
-          <div className="flex-1 flex flex-col justify-center max-w-5xl w-full mx-auto animate-fadeIn">
+          <div className="flex-1 flex flex-col justify-center max-w-5xl w-full mx-auto">
             <div className="mb-8">
               <h2 className="text-2xl font-bold text-slate-100 tracking-tight">기초시간표 빌더 패널</h2>
               <p className="text-sm text-slate-400 mt-1">학기 초 시간표 자동 연산 및 기초 데이터 세팅을 위한 핵심 단계입니다.</p>
             </div>
 
             <div className="grid grid-cols-2 gap-6">
-              <div onClick={() => alert('양식을 다운로드합니다.')} className="h-48 bg-slate-900/40 border border-slate-800 rounded-2xl p-6 flex flex-col justify-center items-center text-center cursor-pointer transition-all duration-300 hover:bg-slate-900/80 hover:border-slate-700 group">
+              <div onClick={downloadTemplate} className="h-48 bg-slate-900/40 border border-slate-800 rounded-2xl p-6 flex flex-col justify-center items-center text-center cursor-pointer transition-all duration-300 hover:bg-slate-900/80 hover:border-slate-700 group">
                 <span className="text-2xl mb-2">📥</span>
                 <h3 className="text-base font-bold text-slate-200">교사별 시수표 양식 다운로드</h3>
                 <p className="text-xs text-slate-500 mt-2">표준 템플릿 파일 획득</p>
@@ -202,8 +212,8 @@ export default function RootMainPage() {
         )}
 
         {activeMenu === 'START_TIMETABLE' && (
-          <div className="w-full h-full flex flex-col animate-fadeIn">
-            <DashboardPage units={globalUnits} />
+          <div className="w-full h-full flex flex-col">
+            <DashboardPage units={globalUnits} classCount={classCount} />
           </div>
         )}
       </main>
