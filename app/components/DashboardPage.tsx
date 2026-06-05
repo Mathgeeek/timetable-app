@@ -1,29 +1,8 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import { TeacherUnit, Assignment } from '@/app/types';
 
-interface TeacherUnit {
-  id: string;
-  name: string;
-  subject: string;
-  grade: number;
-  classNum: number;
-  totalHours: number;
-  color: string;
-}
-
-interface Assignment {
-  id: string;
-  unitId: string;
-  name: string;
-  subject: string;
-  grade: number;
-  classNum: number;
-  day: string;
-  period: number;
-  color: string;
-  isFixed: boolean;
-}
 
 const DAYS = ['월', '화', '수', '목', '금'];
 const PERIODS = [1, 2, 3, 4, 5, 6, 7];

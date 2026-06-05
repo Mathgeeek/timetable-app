@@ -1,25 +1,18 @@
+// app/page.tsx
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import { parseScheduleFile } from '@/lib/parseSchedule';
-
-interface TeacherUnit {
-  id: string;
-  name: string;
-  subject: string;
-  grade: number;
-  classNum: number;
-  totalHours: number;
-  color: string;
-}
+import { TeacherUnit } from '@/app/types';
+import ElectiveGroupBuilder from '@/app/components/setup/ElectiveGroupBuilder';
 
 const DashboardPage = dynamic(() => import('@/app/components/DashboardPage'), {
   ssr: false,
   loading: () => <div className="min-h-screen bg-slate-950 text-slate-400 p-8">대시보드 로딩 중...</div>
 });
 
-type MenuState = 'CONFIG_PANEL' | 'START_TIMETABLE';
+type MenuState = 'CONFIG_PANEL' | 'START_TIMETABLE' | 'ELECTIVE_GROUP';
 
 export default function RootMainPage() {
   const [isMounted, setIsMounted] = useState(false);
@@ -116,7 +109,7 @@ export default function RootMainPage() {
       {/* 좌측 사이드바 */}
       <aside className="w-72 border-r border-slate-800 bg-slate-900/40 p-6 flex flex-col gap-6 backdrop-blur-md">
         <div className="mb-2">
-          <h1 className="text-lg font-bold tracking-tight bg-gradient-to-r from-amber-400 to-orange-400 bg-clip-text text-transparent">
+          <h1 className="text-lg font-bold tracking-tight bg-linear-to-r from-amber-400 to-orange-400 bg-clip-text text-transparent">
             시간표 일과 마스터
           </h1>
           <p className="text-xs text-slate-500 mt-0.5">관리자 콘솔 v1.0</p>
@@ -165,6 +158,7 @@ export default function RootMainPage() {
       {/* 우측 콘텐츠 */}
       <main className="flex-1 p-8 flex flex-col overflow-hidden relative">
 
+        {/* 1. 기초시간표 설정 메뉴 (대시보드) */}
         {activeMenu === 'CONFIG_PANEL' && (
           <div className="flex-1 flex flex-col justify-center max-w-5xl w-full mx-auto">
             <div className="mb-8">
@@ -173,12 +167,14 @@ export default function RootMainPage() {
             </div>
 
             <div className="grid grid-cols-2 gap-6">
+              {/* 시수표 양식 다운로드 */}
               <div onClick={downloadTemplate} className="h-48 bg-slate-900/40 border border-slate-800 rounded-2xl p-6 flex flex-col justify-center items-center text-center cursor-pointer transition-all duration-300 hover:bg-slate-900/80 hover:border-slate-700 group">
                 <span className="text-2xl mb-2">📥</span>
                 <h3 className="text-base font-bold text-slate-200">교사별 시수표 양식 다운로드</h3>
                 <p className="text-xs text-slate-500 mt-2">표준 템플릿 파일 획득</p>
               </div>
 
+              {/* 시수표 엑셀 업로드 */}
               <div
                 onClick={triggerFileBrowser}
                 className={`h-48 border rounded-2xl p-6 flex flex-col justify-center items-center text-center cursor-pointer transition-all duration-300 group ${
@@ -198,11 +194,23 @@ export default function RootMainPage() {
                 </p>
               </div>
 
-              <div className="h-48 bg-slate-900/40 border border-slate-800 rounded-2xl p-6 flex flex-col justify-center items-center text-center text-slate-500">
-                <span className="text-2xl mb-2 opacity-40">⛓️</span>
-                <h3 className="text-base font-bold opacity-60">선택 과목(동시 수업) 그룹화</h3>
+              {/* 선택 과목 그룹화 버튼 (수정된 부분) */}
+              <div 
+                onClick={() => {
+                  if (globalUnits.length === 0) {
+                    alert('먼저 교사별 시수표 엑셀을 업로드해주세요!');
+                    return;
+                  }
+                  setActiveMenu('ELECTIVE_GROUP');
+                }}
+                className="h-48 bg-slate-900/40 border border-slate-800 rounded-2xl p-6 flex flex-col justify-center items-center text-center cursor-pointer hover:border-blue-500/50 hover:bg-slate-900/80 transition-all group"
+              >
+                <span className="text-2xl mb-2 group-hover:scale-110 transition-transform">⛓️</span>
+                <h3 className="text-base font-bold text-slate-300 group-hover:text-blue-400">선택 과목(동시 수업) 그룹화</h3>
+                <p className="text-xs text-slate-500 mt-2">동시간대 묶음 수업 설정</p>
               </div>
 
+              {/* 특별실 배정 (추후 개발 예정) */}
               <div className="h-48 bg-slate-900/40 border border-slate-800 rounded-2xl p-6 flex flex-col justify-center items-center text-center text-slate-500">
                 <span className="text-2xl mb-2 opacity-40">🏫</span>
                 <h3 className="text-base font-bold opacity-60">교과 특별실 배정</h3>
@@ -211,13 +219,21 @@ export default function RootMainPage() {
           </div>
         )}
 
+        {/* 2. 동시수업 그룹화 메뉴 렌더링 (추가된 부분) */}
+        {activeMenu === 'ELECTIVE_GROUP' && (
+          <div className="w-full h-full flex flex-col">
+            <ElectiveGroupBuilder initialUnits={globalUnits} />
+          </div>
+        )}
+
+        {/* 3. 기초 시간표 작성 시작 렌더링 */}
         {activeMenu === 'START_TIMETABLE' && (
           <div className="w-full h-full flex flex-col">
             <DashboardPage units={globalUnits} classCount={classCount} />
           </div>
         )}
-      </main>
 
+      </main>
     </div>
   );
 }
