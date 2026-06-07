@@ -37,3 +37,11 @@ export interface SpecialRoom {
   capacity: number; // 동시에 수업 가능한 학급 수
   unitIds: string[]; // 이 특별실을 사용하는 수업 유닛 ID들
 }
+
+// 수업 배정 금지 슬롯 (교사 기준)
+export interface BlockedSlot {
+  id: string;
+  teacherName: string;
+  day: string;
+  period: number;
+}

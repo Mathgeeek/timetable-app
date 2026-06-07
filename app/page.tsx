@@ -257,10 +257,11 @@ export default function RootMainPage() {
         {/* 3. 기초 시간표 작성 시작 렌더링 */}
         {activeMenu === 'START_TIMETABLE' && (
           <div className="w-full h-full flex flex-col">
-            <DashboardPage 
-              units={globalUnits} 
-              classCount={classCount} 
-              specialRooms={specialRooms} 
+            <DashboardPage
+              units={globalUnits}
+              classCount={classCount}
+              specialRooms={specialRooms}
+              electiveGroups={electiveGroups}
             />
           </div>
         )}
