@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { TeacherUnit, Assignment } from '@/app/types';
+import { TeacherUnit, Assignment, SpecialRoom } from '@/app/types';
 
 
 const DAYS = ['월', '화', '수', '목', '금'];
@@ -10,9 +10,10 @@ const PERIODS = [1, 2, 3, 4, 5, 6, 7];
 interface DashboardProps {
   units: TeacherUnit[];
   classCount: { [grade: number]: number };
+  specialRooms: SpecialRoom[];
 }
 
-export default function DashboardPage({ units, classCount }: DashboardProps) {
+export default function DashboardPage({ units, classCount, specialRooms }: DashboardProps) {
   const [isMounted, setIsMounted] = useState(false);
   const [assignments, setAssignments] = useState<Assignment[]>([]);
 
@@ -71,6 +72,21 @@ export default function DashboardPage({ units, classCount }: DashboardProps) {
     if (isClassBusy) {
       alert(`⚠️ ${targetGrade}학년 ${targetClass}반은 ${period}교시에 이미 다른 수업이 있습니다!`);
       return;
+    }
+
+    // 3. 특별실 중복 검사: 해당 수업이 특별실을 사용하는 경우 수용량 체크
+    const targetRoom = specialRooms.find(r => r.unitIds.includes(unit.id));
+    if (targetRoom) {
+      const roomBusyCount = assignments.filter(a => 
+        a.day === day && 
+        a.period === period && 
+        targetRoom.unitIds.includes(a.unitId)
+      ).length;
+
+      if (roomBusyCount >= targetRoom.capacity) {
+        alert(`⚠️ ${targetRoom.name}은(는) ${day}요일 ${period}교시에 이미 최대 수용량(${targetRoom.capacity}학급)이 사용 중입니다!`);
+        return;
+      }
     }
 
     const newAssignment: Assignment = {

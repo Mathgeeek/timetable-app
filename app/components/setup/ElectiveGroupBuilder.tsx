@@ -6,19 +6,14 @@ import { TeacherUnit, ElectiveGroup } from '@/app/types';
 import TeacherClassGrid from '@/app/components/setup/TeacherClassGrid';
 
 interface ElectiveGroupBuilderProps {
-  // 상위 페이지에서 엑셀 파싱된 전체 유닛을 넘겨받는다고 가정합니다
   initialUnits: TeacherUnit[];
+  groups: ElectiveGroup[];
+  setGroups: React.Dispatch<React.SetStateAction<ElectiveGroup[]>>;
 }
 
-export default function ElectiveGroupBuilder({ initialUnits }: ElectiveGroupBuilderProps) {
+export default function ElectiveGroupBuilder({ initialUnits, groups, setGroups }: ElectiveGroupBuilderProps) {
   // 현재 선택된 학년 (1, 2, 3)
   const [selectedGrade, setSelectedGrade] = useState(1);
-
-  // 생성된 동시수업 그룹들을 관리하는 상태 (추후 이 데이터를 Firebase에 저장)
-  const [groups, setGroups] = useState<ElectiveGroup[]>([
-    // 예시용 초기 데이터 하나 생성
-    { groupId: 'group_1', groupName: '2학년 과학탐구 동시수업', unitIds: [] }
-  ]);
 
   // 어떤 유닛이 이미 그룹에 묶였는지 추적 (서랍장에서 숨기기 위함)
   const usedUnitIds = groups.flatMap(g => g.unitIds);
@@ -72,7 +67,7 @@ export default function ElectiveGroupBuilder({ initialUnits }: ElectiveGroupBuil
     <div className="flex h-screen w-full bg-slate-950 text-slate-100 font-sans overflow-hidden select-none">
       
       {/* 왼쪽: 교사-학급 그리드 (과목명 유닛들) */}
-      <section className="flex-[3] flex flex-col overflow-hidden border-r border-slate-800">
+      <section className="flex-3 flex flex-col overflow-hidden border-r border-slate-800">
         <div className="p-4 bg-slate-900/80 border-b border-slate-800">
           <h2 className="text-lg font-bold text-amber-400">수업 유닛 현황 (교사/학급)</h2>
           <p className="text-xs text-slate-400">과목명을 드래그하여 오른쪽 그룹으로 이동시키세요.</p>
@@ -99,7 +94,7 @@ export default function ElectiveGroupBuilder({ initialUnits }: ElectiveGroupBuil
       </section>
 
       {/* 오른쪽: 동시수업 그룹화 빌더 */}
-      <section className="flex-[2] flex flex-col overflow-hidden bg-slate-950">
+      <section className="flex-2 flex flex-col overflow-hidden bg-slate-950">
         <div className="p-6 border-b border-slate-800 flex justify-between items-center bg-slate-900/30">
           <div>
             <h2 className="text-xl font-bold text-slate-100">동시수업 그룹 설정</h2>
@@ -121,7 +116,7 @@ export default function ElectiveGroupBuilder({ initialUnits }: ElectiveGroupBuil
                 key={group.groupId}
                 onDragOver={handleDragOver}
                 onDrop={(e) => handleDropToGroup(e, group.groupId)}
-                className="bg-slate-900 border border-slate-700 rounded-xl p-4 min-h-[150px] flex flex-col shadow-md transition-colors hover:border-slate-500"
+                className="bg-slate-900 border border-slate-700 rounded-xl p-4 min-h-37.5 flex flex-col shadow-md transition-colors hover:border-slate-500"
               >
                 <div className="flex justify-between items-start mb-3 border-b border-slate-800 pb-2">
                   <input 

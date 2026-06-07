@@ -29,3 +29,11 @@ export interface ElectiveGroup {
   groupName: string;
   unitIds: string[]; // 어떤 수업 유닛들이 이 그룹에 속해있는지 ID만 저장
 }
+
+// 특별실 데이터
+export interface SpecialRoom {
+  id: string;
+  name: string;
+  capacity: number; // 동시에 수업 가능한 학급 수
+  unitIds: string[]; // 이 특별실을 사용하는 수업 유닛 ID들
+}
