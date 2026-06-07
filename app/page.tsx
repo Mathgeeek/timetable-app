@@ -4,21 +4,24 @@
 import React, { useState, useEffect, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import { parseScheduleFile } from '@/lib/parseSchedule';
-import { TeacherUnit } from '@/app/types';
+import { ElectiveGroup, SpecialRoom, TeacherUnit } from '@/app/types';
 import ElectiveGroupBuilder from '@/app/components/setup/ElectiveGroupBuilder';
+import SpecialRoomManager from '@/app/components/setup/SpecialRoomManager';
 
 const DashboardPage = dynamic(() => import('@/app/components/DashboardPage'), {
   ssr: false,
   loading: () => <div className="min-h-screen bg-slate-950 text-slate-400 p-8">대시보드 로딩 중...</div>
 });
 
-type MenuState = 'CONFIG_PANEL' | 'START_TIMETABLE' | 'ELECTIVE_GROUP';
+type MenuState = 'CONFIG_PANEL' | 'START_TIMETABLE' | 'ELECTIVE_GROUP' | 'SPECIAL_ROOM';
 
 export default function RootMainPage() {
   const [isMounted, setIsMounted] = useState(false);
   const [activeMenu, setActiveMenu] = useState<MenuState>('CONFIG_PANEL');
   const [globalUnits, setGlobalUnits] = useState<TeacherUnit[]>([]);
   const [classCount, setClassCount] = useState<{ [grade: number]: number }>({ 1: 12, 2: 12, 3: 12 });
+  const [specialRooms, setSpecialRooms] = useState<SpecialRoom[]>([]);
+  const [electiveGroups, setElectiveGroups] = useState<ElectiveGroup[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -210,10 +213,20 @@ export default function RootMainPage() {
                 <p className="text-xs text-slate-500 mt-2">동시간대 묶음 수업 설정</p>
               </div>
 
-              {/* 특별실 배정 (추후 개발 예정) */}
-              <div className="h-48 bg-slate-900/40 border border-slate-800 rounded-2xl p-6 flex flex-col justify-center items-center text-center text-slate-500">
-                <span className="text-2xl mb-2 opacity-40">🏫</span>
-                <h3 className="text-base font-bold opacity-60">교과 특별실 배정</h3>
+              {/* 특별실 배정 */}
+              <div 
+                onClick={() => {
+                  if (globalUnits.length === 0) {
+                    alert('먼저 교사별 시수표 엑셀을 업로드해주세요!');
+                    return;
+                  }
+                  setActiveMenu('SPECIAL_ROOM');
+                }}
+                className="h-48 bg-slate-900/40 border border-slate-800 rounded-2xl p-6 flex flex-col justify-center items-center text-center cursor-pointer hover:border-emerald-500/50 hover:bg-slate-900/80 transition-all group"
+              >
+                <span className="text-2xl mb-2 group-hover:scale-110 transition-transform">🏫</span>
+                <h3 className="text-base font-bold text-slate-300 group-hover:text-emerald-400">교과 특별실 배정</h3>
+                <p className="text-xs text-slate-500 mt-2">음악실, 과학실 등 전용 교실 설정</p>
               </div>
             </div>
           </div>
@@ -222,14 +235,33 @@ export default function RootMainPage() {
         {/* 2. 동시수업 그룹화 메뉴 렌더링 (추가된 부분) */}
         {activeMenu === 'ELECTIVE_GROUP' && (
           <div className="w-full h-full flex flex-col">
-            <ElectiveGroupBuilder initialUnits={globalUnits} />
+            <ElectiveGroupBuilder 
+              initialUnits={globalUnits} 
+              groups={electiveGroups} 
+              setGroups={setElectiveGroups} 
+            />
+          </div>
+        )}
+
+        {/* 2-1. 특별실 관리 메뉴 렌더링 */}
+        {activeMenu === 'SPECIAL_ROOM' && (
+          <div className="w-full h-full flex flex-col">
+            <SpecialRoomManager 
+              initialUnits={globalUnits} 
+              rooms={specialRooms} 
+              setRooms={setSpecialRooms} 
+            />
           </div>
         )}
 
         {/* 3. 기초 시간표 작성 시작 렌더링 */}
         {activeMenu === 'START_TIMETABLE' && (
           <div className="w-full h-full flex flex-col">
-            <DashboardPage units={globalUnits} classCount={classCount} />
+            <DashboardPage 
+              units={globalUnits} 
+              classCount={classCount} 
+              specialRooms={specialRooms} 
+            />
           </div>
         )}
 

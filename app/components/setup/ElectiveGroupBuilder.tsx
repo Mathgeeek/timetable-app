@@ -3,19 +3,17 @@
 
 import React, { useState } from 'react';
 import { TeacherUnit, ElectiveGroup } from '@/app/types';
-import UnitSidebar from '@/app/components/common/UnitSidebar';
+import TeacherClassGrid from '@/app/components/setup/TeacherClassGrid';
 
 interface ElectiveGroupBuilderProps {
-  // 상위 페이지에서 엑셀 파싱된 전체 유닛을 넘겨받는다고 가정합니다
   initialUnits: TeacherUnit[];
+  groups: ElectiveGroup[];
+  setGroups: React.Dispatch<React.SetStateAction<ElectiveGroup[]>>;
 }
 
-export default function ElectiveGroupBuilder({ initialUnits }: ElectiveGroupBuilderProps) {
-  // 생성된 동시수업 그룹들을 관리하는 상태 (추후 이 데이터를 Firebase에 저장)
-  const [groups, setGroups] = useState<ElectiveGroup[]>([
-    // 예시용 초기 데이터 하나 생성
-    { groupId: 'group_1', groupName: '2학년 과학탐구 동시수업', unitIds: [] }
-  ]);
+export default function ElectiveGroupBuilder({ initialUnits, groups, setGroups }: ElectiveGroupBuilderProps) {
+  // 현재 선택된 학년 (1, 2, 3)
+  const [selectedGrade, setSelectedGrade] = useState(1);
 
   // 어떤 유닛이 이미 그룹에 묶였는지 추적 (서랍장에서 숨기기 위함)
   const usedUnitIds = groups.flatMap(g => g.unitIds);
@@ -68,76 +66,111 @@ export default function ElectiveGroupBuilder({ initialUnits }: ElectiveGroupBuil
   return (
     <div className="flex h-screen w-full bg-slate-950 text-slate-100 font-sans overflow-hidden select-none">
       
-      {/* 왼쪽: 재사용 가능한 시수 블록 서랍장 */}
-      <UnitSidebar units={initialUnits} usedUnitIds={usedUnitIds} />
+      {/* 왼쪽: 교사-학급 그리드 (과목명 유닛들) */}
+      <section className="flex-3 flex flex-col overflow-hidden border-r border-slate-800">
+        <div className="p-4 bg-slate-900/80 border-b border-slate-800">
+          <h2 className="text-lg font-bold text-amber-400">수업 유닛 현황 (교사/학급)</h2>
+          <p className="text-xs text-slate-400">과목명을 드래그하여 오른쪽 그룹으로 이동시키세요.</p>
+        </div>
+        
+        <TeacherClassGrid units={initialUnits} usedUnitIds={usedUnitIds} selectedGrade={selectedGrade} />
 
-      {/* 오른쪽: 그룹화 빌더 메인 화면 */}
-      <main className="flex-1 p-8 flex flex-col overflow-y-auto">
-        <div className="mb-8 flex justify-between items-center border-b border-slate-800 pb-4">
+        {/* 하단 학년 선택 탭 */}
+        <div className="flex bg-slate-900 border-t border-slate-800 p-1">
+          {[1, 2, 3].map(grade => (
+            <button
+              key={grade}
+              onClick={() => setSelectedGrade(grade)}
+              className={`flex-1 py-3 text-sm font-bold transition-all ${
+                selectedGrade === grade 
+                  ? 'bg-blue-600 text-white shadow-inner' 
+                  : 'text-slate-500 hover:bg-slate-800 hover:text-slate-300'
+              }`}
+            >
+              {grade}학년
+            </button>
+          ))}
+        </div>
+      </section>
+
+      {/* 오른쪽: 동시수업 그룹화 빌더 */}
+      <section className="flex-2 flex flex-col overflow-hidden bg-slate-950">
+        <div className="p-6 border-b border-slate-800 flex justify-between items-center bg-slate-900/30">
           <div>
-            <h2 className="text-2xl font-bold text-slate-100">선택 과목 (동시 수업) 그룹화</h2>
-            <p className="text-sm text-slate-400 mt-1">좌측 서랍장에서 수업을 드래그하여 무조건 같은 시간에 묶여야 할 수업들을 그룹핑하세요.</p>
+            <h2 className="text-xl font-bold text-slate-100">동시수업 그룹 설정</h2>
+            <p className="text-xs text-slate-400 mt-1">동일 시간에 진행될 수업들을 묶으세요.</p>
           </div>
           <button 
             onClick={handleSaveToDB}
-            className="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg transition-colors shadow-lg shadow-blue-900/20"
+            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg transition-colors shadow-lg shadow-blue-900/20"
           >
-            설정 저장하기
+            저장
           </button>
         </div>
 
-        {/* 그룹 리스트 컨테이너 */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {groups.map(group => (
-            <div 
-              key={group.groupId}
-              onDragOver={handleDragOver}
-              onDrop={(e) => handleDropToGroup(e, group.groupId)}
-              className="bg-slate-900 border border-slate-700 rounded-xl p-5 min-h-75 flex flex-col shadow-md transition-colors hover:border-slate-500"
-            >
-              <input 
-                type="text" 
-                value={group.groupName}
-                onChange={(e) => setGroups(prev => prev.map(g => g.groupId === group.groupId ? { ...g, groupName: e.target.value } : g))}
-                className="bg-transparent text-lg font-bold text-amber-400 border-b border-slate-700 pb-1 mb-4 focus:outline-none focus:border-amber-400"
-              />
-              
-              <div className="flex-1 flex flex-col gap-2">
-                {group.unitIds.length === 0 ? (
-                  <div className="h-full flex items-center justify-center text-slate-500 text-sm border-2 border-dashed border-slate-800 rounded-lg">
-                    이곳에 수업 블록을 드롭하세요
-                  </div>
-                ) : (
-                  group.unitIds.map(unitId => {
-                    const unit = initialUnits.find(u => u.id === unitId);
-                    if (!unit) return null;
-                    return (
-                      <div key={unit.id} className="bg-slate-800 p-3 rounded-lg flex justify-between items-center border border-slate-700">
-                        <div>
-                          <p className="text-sm font-semibold text-slate-200">{unit.subject} ({unit.name})</p>
-                          <p className="text-xs text-slate-400">{unit.grade}학년 {unit.classNum}반</p>
+        <div className="flex-1 overflow-y-auto p-6 space-y-6">
+          {/* 그룹 리스트 컨테이너 */}
+          <div className="grid grid-cols-1 gap-4">
+            {groups.map(group => (
+              <div 
+                key={group.groupId}
+                onDragOver={handleDragOver}
+                onDrop={(e) => handleDropToGroup(e, group.groupId)}
+                className="bg-slate-900 border border-slate-700 rounded-xl p-4 min-h-37.5 flex flex-col shadow-md transition-colors hover:border-slate-500"
+              >
+                <div className="flex justify-between items-start mb-3 border-b border-slate-800 pb-2">
+                  <input 
+                    type="text" 
+                    value={group.groupName}
+                    onChange={(e) => setGroups(prev => prev.map(g => g.groupId === group.groupId ? { ...g, groupName: e.target.value } : g))}
+                    className="bg-transparent text-md font-bold text-amber-400 focus:outline-none focus:ring-0 w-full"
+                    placeholder="그룹명 입력..."
+                  />
+                  <button 
+                    onClick={() => setGroups(prev => prev.filter(g => g.groupId !== group.groupId))}
+                    className="ml-2 text-slate-500 hover:text-red-400 text-xs"
+                  >
+                    삭제
+                  </button>
+                </div>
+                
+                <div className="flex-1 flex flex-wrap gap-2 content-start">
+                  {group.unitIds.length === 0 ? (
+                    <div className="w-full h-20 flex items-center justify-center text-slate-600 text-xs border-2 border-dashed border-slate-800 rounded-lg italic">
+                      여기에 수업 유닛을 드롭하세요
+                    </div>
+                  ) : (
+                    group.unitIds.map(unitId => {
+                      const unit = initialUnits.find(u => u.id === unitId);
+                      if (!unit) return null;
+                      return (
+                        <div key={unit.id} className={`${unit.color || 'bg-slate-800'} p-2 rounded border border-white/10 flex items-center gap-2 shadow-sm`}>
+                          <div className="flex flex-col">
+                            <span className="text-xs font-bold text-white leading-tight">{unit.subject}</span>
+                            <span className="text-[10px] text-white/80 leading-tight">{unit.name} ({unit.grade}-{unit.classNum})</span>
+                          </div>
+                          <button onClick={() => handleRemoveUnit(group.groupId, unit.id)} className="text-white/50 hover:text-white text-xs">
+                            ✕
+                          </button>
                         </div>
-                        <button onClick={() => handleRemoveUnit(group.groupId, unit.id)} className="text-slate-500 hover:text-red-400 text-sm">
-                          ✕
-                        </button>
-                      </div>
-                    )
-                  })
-                )}
+                      )
+                    })
+                  )}
+                </div>
               </div>
-            </div>
-          ))}
+            ))}
 
-          {/* 새 그룹 추가 버튼 */}
-          <button 
-            onClick={handleAddGroup}
-            className="border-2 border-dashed border-slate-700 hover:border-slate-500 hover:bg-slate-800/50 rounded-xl min-h-75 flex flex-col items-center justify-center text-slate-500 hover:text-slate-300 transition-all"
-          >
-            <span className="text-3xl mb-2">+</span>
-            <span>새 동시수업 그룹 추가</span>
-          </button>
+            {/* 새 그룹 추가 버튼 */}
+            <button 
+              onClick={handleAddGroup}
+              className="border-2 border-dashed border-slate-700 hover:border-slate-500 hover:bg-slate-800/50 rounded-xl p-6 flex flex-col items-center justify-center text-slate-500 hover:text-slate-300 transition-all group"
+            >
+              <span className="text-2xl mb-1 group-hover:scale-125 transition-transform">+</span>
+              <span className="text-sm font-medium">새 동시수업 그룹 추가</span>
+            </button>
+          </div>
         </div>
-      </main>
+      </section>
     </div>
   );
 }
