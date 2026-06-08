@@ -10,10 +10,54 @@ interface SpecialRoomManagerProps {
   setRooms: React.Dispatch<React.SetStateAction<SpecialRoom[]>>;
 }
 
+// 기본 특별실 정의
+const DEFAULT_ROOMS: { name: string; capacity: number; subjectKeywords: string[] }[] = [
+  { name: '음악실', capacity: 1, subjectKeywords: ['음악', '음감', '음창'] },
+  { name: '미술실', capacity: 1, subjectKeywords: ['미술', '미감', '미창'] },
+  { name: '체육관/운동장', capacity: 4, subjectKeywords: ['체육', '운동', '운건'] },
+  { name: '컴퓨터실', capacity: 2, subjectKeywords: ['정보', '컴퓨터', '공학', '인공지능'] },
+  { name: '과학탐구실', capacity: 2, subjectKeywords: ['과탐', '과학실', '물리실', '화학실', '생명실'] },
+  { name: '정보탐색실', capacity: 2, subjectKeywords: ['정보탐색', '인지'] },
+];
+
+function autoMatchUnitsToRoom(units: TeacherUnit[], keywords: string[]): string[] {
+  return units
+    .filter(u => keywords.some(kw =>
+      u.subject.toLowerCase().includes(kw.toLowerCase())
+    ))
+    .map(u => u.id);
+}
+
 export default function SpecialRoomManager({ initialUnits, rooms, setRooms }: SpecialRoomManagerProps) {
   const [selectedGrade, setSelectedGrade] = useState(1);
 
   const usedUnitIds = rooms.flatMap(r => r.unitIds);
+
+  // 기본 특별실 일괄 등록
+  const handleAddDefaultRooms = () => {
+    const newRooms: SpecialRoom[] = DEFAULT_ROOMS
+      .filter(def => !rooms.some(r => r.name.includes(def.name.split('/')[0])))
+      .map(def => ({
+        id: `room_default_${def.name}_${Date.now()}`,
+        name: def.name,
+        capacity: def.capacity,
+        unitIds: autoMatchUnitsToRoom(initialUnits, def.subjectKeywords),
+      }));
+
+    if (newRooms.length === 0) {
+      alert('이미 모든 기본 특별실이 등록되어 있습니다.');
+      return;
+    }
+
+    setRooms(prev => [...prev, ...newRooms]);
+    const autoMatched = newRooms.filter(r => r.unitIds.length > 0);
+    alert(
+      `✅ ${newRooms.length}개 기본 특별실이 추가되었습니다.\n` +
+      `📌 자동 매칭된 특별실: ${autoMatched.length}개\n\n` +
+      newRooms.map(r => `• ${r.name} (수용 ${r.capacity}반) — ${r.unitIds.length}개 유닛 자동 연결`).join('\n') +
+      '\n\n수용 인원은 실제 학교 상황에 맞게 수정해 주세요.'
+    );
+  };
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
@@ -51,7 +95,6 @@ export default function SpecialRoomManager({ initialUnits, rooms, setRooms }: Sp
   };
 
   const handleSaveToDB = () => {
-    console.log('Firebase /constraints/specialRooms 에 저장될 데이터:', rooms);
     alert('특별실 데이터가 성공적으로 저장되었습니다!');
   };
 
@@ -91,12 +134,21 @@ export default function SpecialRoomManager({ initialUnits, rooms, setRooms }: Sp
             <h2 className="text-xl font-bold text-slate-100">특별실 설정</h2>
             <p className="text-xs text-slate-400 mt-1 font-light italic">동시 사용 가능한 학급 수(수용량)를 설정하세요.</p>
           </div>
-          <button 
-            onClick={handleSaveToDB}
-            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium rounded-lg transition-colors shadow-lg shadow-emerald-900/20"
-          >
-            저장
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleAddDefaultRooms}
+              className="px-3 py-2 bg-slate-700 hover:bg-slate-600 border border-slate-600 text-slate-300 text-xs font-bold rounded-lg transition-all flex items-center gap-1.5"
+              title="음악실·미술실·체육관·컴퓨터실 등 기본 특별실을 한 번에 추가합니다"
+            >
+              🏫 기본 특별실 자동 등록
+            </button>
+            <button
+              onClick={handleSaveToDB}
+              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white text-sm font-medium rounded-lg transition-colors shadow-lg shadow-emerald-900/20"
+            >
+              저장
+            </button>
+          </div>
         </div>
 
         <div className="flex-1 overflow-y-auto p-6 space-y-6">
