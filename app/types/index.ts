@@ -45,3 +45,17 @@ export interface BlockedSlot {
   day: string;
   period: number;
 }
+
+// 학년별 요일별 운영 교시 수 설정
+// periodConfig[grade][day] = 해당 학년·요일의 최대 교시 수 (1~7)
+export type PeriodConfig = {
+  [grade: number]: {
+    [day: string]: number;
+  };
+};
+
+export const DEFAULT_PERIOD_CONFIG: PeriodConfig = {
+  1: { 월: 7, 화: 7, 수: 7, 목: 7, 금: 7 },
+  2: { 월: 7, 화: 7, 수: 7, 목: 7, 금: 7 },
+  3: { 월: 7, 화: 7, 수: 7, 목: 7, 금: 7 },
+};

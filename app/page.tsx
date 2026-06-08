@@ -4,16 +4,17 @@
 import React, { useState, useEffect, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import { parseScheduleFile } from '@/lib/parseSchedule';
-import { ElectiveGroup, SpecialRoom, TeacherUnit } from '@/app/types';
+import { ElectiveGroup, PeriodConfig, DEFAULT_PERIOD_CONFIG, SpecialRoom, TeacherUnit } from '@/app/types';
 import ElectiveGroupBuilder from '@/app/components/setup/ElectiveGroupBuilder';
 import SpecialRoomManager from '@/app/components/setup/SpecialRoomManager';
+import PeriodConfigPanel from '@/app/components/setup/PeriodConfigPanel';
 
 const DashboardPage = dynamic(() => import('@/app/components/DashboardPage'), {
   ssr: false,
   loading: () => <div className="min-h-screen bg-slate-950 text-slate-400 p-8">대시보드 로딩 중...</div>
 });
 
-type MenuState = 'CONFIG_PANEL' | 'START_TIMETABLE' | 'ELECTIVE_GROUP' | 'SPECIAL_ROOM';
+type MenuState = 'CONFIG_PANEL' | 'START_TIMETABLE' | 'ELECTIVE_GROUP' | 'SPECIAL_ROOM' | 'PERIOD_CONFIG';
 
 export default function RootMainPage() {
   const [isMounted, setIsMounted] = useState(false);
@@ -22,6 +23,7 @@ export default function RootMainPage() {
   const [classCount, setClassCount] = useState<{ [grade: number]: number }>({ 1: 12, 2: 12, 3: 12 });
   const [specialRooms, setSpecialRooms] = useState<SpecialRoom[]>([]);
   const [electiveGroups, setElectiveGroups] = useState<ElectiveGroup[]>([]);
+  const [periodConfig, setPeriodConfig] = useState<PeriodConfig>(DEFAULT_PERIOD_CONFIG);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -214,7 +216,7 @@ export default function RootMainPage() {
               </div>
 
               {/* 특별실 배정 */}
-              <div 
+              <div
                 onClick={() => {
                   if (globalUnits.length === 0) {
                     alert('먼저 교사별 시수표 엑셀을 업로드해주세요!');
@@ -227,6 +229,20 @@ export default function RootMainPage() {
                 <span className="text-2xl mb-2 group-hover:scale-110 transition-transform">🏫</span>
                 <h3 className="text-base font-bold text-slate-300 group-hover:text-emerald-400">교과 특별실 배정</h3>
                 <p className="text-xs text-slate-500 mt-2">음악실, 과학실 등 전용 교실 설정</p>
+              </div>
+
+              {/* 교시 설정 */}
+              <div
+                onClick={() => setActiveMenu('PERIOD_CONFIG')}
+                className={`h-48 border rounded-2xl p-6 flex flex-col justify-center items-center text-center cursor-pointer transition-all group ${
+                  Object.values(periodConfig).some(g => Object.values(g).some(v => v < 7))
+                    ? 'bg-amber-950/20 border-amber-500/40 hover:bg-amber-950/40'
+                    : 'bg-slate-900/40 border-slate-800 hover:border-amber-500/50 hover:bg-slate-900/80'
+                }`}
+              >
+                <span className="text-2xl mb-2 group-hover:scale-110 transition-transform">🗓️</span>
+                <h3 className="text-base font-bold text-slate-300 group-hover:text-amber-400">학년별 교시 운영 설정</h3>
+                <p className="text-xs text-slate-500 mt-2">요일·학년별 최대 교시 수 조정</p>
               </div>
             </div>
           </div>
@@ -254,7 +270,14 @@ export default function RootMainPage() {
           </div>
         )}
 
-        {/* 3. 기초 시간표 작성 시작 렌더링 */}
+        {/* 3. 교시 운영 설정 */}
+        {activeMenu === 'PERIOD_CONFIG' && (
+          <div className="w-full h-full flex flex-col">
+            <PeriodConfigPanel config={periodConfig} onChange={setPeriodConfig} />
+          </div>
+        )}
+
+        {/* 4. 기초 시간표 작성 시작 렌더링 */}
         {activeMenu === 'START_TIMETABLE' && (
           <div className="w-full h-full flex flex-col">
             <DashboardPage
@@ -262,6 +285,7 @@ export default function RootMainPage() {
               classCount={classCount}
               specialRooms={specialRooms}
               electiveGroups={electiveGroups}
+              periodConfig={periodConfig}
             />
           </div>
         )}
