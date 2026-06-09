@@ -92,8 +92,11 @@ export default function ElectiveGroupBuilder({ initialUnits, groups, setGroups }
     const toApply = parsedGroups.filter(pg => selectedParsed.has(pg.groupName));
     const newGroups: ElectiveGroup[] = [];
 
+    // matchUnitsToGroup 결과를 캐싱하여 중복 호출 방지
+    const matchCache = new Map(toApply.map(pg => [pg.groupName, matchUnitsToGroup(pg, initialUnits, autoGrade)]));
+
     for (const pg of toApply) {
-      const matchResults = matchUnitsToGroup(pg, initialUnits, autoGrade);
+      const matchResults = matchCache.get(pg.groupName)!;
       const matchedIds = matchResults.filter(r => r.matched).map(r => r.unitId);
 
       if (matchedIds.length === 0) continue;
@@ -120,9 +123,7 @@ export default function ElectiveGroupBuilder({ initialUnits, groups, setGroups }
     }
 
     const applied = toApply.length;
-    const noMatch = toApply.filter(pg =>
-      matchUnitsToGroup(pg, initialUnits, autoGrade).every(r => !r.matched)
-    ).length;
+    const noMatch = toApply.filter(pg => matchCache.get(pg.groupName)!.every(r => !r.matched)).length;
 
     alert(
       `✅ ${applied - noMatch}개 그룹이 적용되었습니다.` +

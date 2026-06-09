@@ -68,12 +68,14 @@ export function normalizeSubject(raw: string): string {
   return s;
 }
 
+const ROMAN_TO_ARABIC: Record<string, string> = { ⅰ: '1', ⅱ: '2', ⅲ: '3', ⅳ: '4' };
+
 /** TeacherUnit 과목명과 편성안 과목명이 같은지 판별 (퍼지 매칭) */
 export function subjectMatches(unitSubject: string, cellSubject: string): boolean {
   const normalize = (s: string) =>
     s.toLowerCase()
       .replace(/\s+/g, '')
-      .replace(/[ⅰⅱⅲⅳⅰ]/g, m => ({ ⅰ: '1', ⅱ: '2', ⅲ: '3', ⅳ: '4' }[m] ?? m))
+      .replace(/[ⅰⅱⅲⅳ]/g, m => ROMAN_TO_ARABIC[m] ?? m)
       .replace(/[iI]+$/g, '');
 
   const a = normalize(unitSubject);

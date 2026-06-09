@@ -59,3 +59,19 @@ export const DEFAULT_PERIOD_CONFIG: PeriodConfig = {
   2: { 월: 7, 화: 7, 수: 7, 목: 7, 금: 7 },
   3: { 월: 7, 화: 7, 수: 7, 목: 7, 금: 7 },
 };
+
+// 교시별 운영 시간 (시작·종료)
+export interface PeriodTime {
+  start: string; // "09:00"
+  end: string;   // "09:50"
+}
+
+export const DEFAULT_PERIOD_TIMES: PeriodTime[] = [
+  { start: '09:00', end: '09:50' },
+  { start: '09:55', end: '10:45' },
+  { start: '11:00', end: '11:50' },
+  { start: '11:55', end: '12:45' },
+  { start: '13:30', end: '14:20' },
+  { start: '14:25', end: '15:15' },
+  { start: '15:20', end: '16:10' },
+];

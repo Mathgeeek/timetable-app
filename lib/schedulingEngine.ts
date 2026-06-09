@@ -46,21 +46,6 @@ function maxConsecutiveRun(periods: number[]): number {
   return best;
 }
 
-function makeAssignment(unit: TeacherUnit, day: string, period: number): Assignment {
-  return {
-    id: `auto-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-    unitId: unit.id,
-    name: unit.name,
-    subject: unit.subject,
-    grade: unit.grade,
-    classNum: unit.classNum,
-    day,
-    period,
-    color: unit.color,
-    isFixed: false,
-  };
-}
-
 export function runScheduler(input: SchedulingInput): SchedulingResult {
   const periodConfig = input.periodConfig ?? DEFAULT_PERIOD_CONFIG;
 
@@ -69,32 +54,74 @@ export function runScheduler(input: SchedulingInput): SchedulingResult {
   const classSlotSet = new Set<string>();   // `${day}-${period}-${grade}-${classNum}`
   const roomSlotCount = new Map<string, number>(); // `${roomId}-${day}-${period}` → count
 
+  // ── 사전 계산 맵 (매 호출마다 선형 탐색 제거) ───────────────────────────────
+  // unitId → SpecialRoom: roomOf() 선형 탐색을 O(1)로 대체
+  const unitToRoom = new Map<string, SpecialRoom>(
+    input.specialRooms.flatMap(r => r.unitIds.map(uid => [uid, r] as [string, SpecialRoom]))
+  );
+  // "day-period-teacherName" Set: isBlocked() 선형 탐색을 O(1)로 대체
+  const blockedSet = new Set<string>(
+    input.blockedSlots.map(b => `${b.day}-${b.period}-${b.teacherName}`)
+  );
+
+  // ── scoreSlot 최적화용 보조 인덱스 ─────────────────────────────────────────
+  // "name\0day" → 배정된 교시 목록 (연속 강의 계산 + teacherDayLoad)
+  const tdPeriods = new Map<string, number[]>();
+  // "grade-classNum-day" → 배정 수 (classDayLoad)
+  const classDayCount = new Map<string, number>();
+  // "grade-classNum-day-subject" → 배정 수 (동일 과목 중복 체크)
+  const classDaySubjectCount = new Map<string, number>();
+  // 1·4교시 배정 수 (교시 쏠림 판단)
+  let period14Count = 0;
+
   // 기존 배정은 깊은 복사 (React state 객체 직접 변형 방지)
   const working: Assignment[] = input.assignments.map(a => ({ ...a }));
   const newAssignments: Assignment[] = [];
   const placedCount = new Map<string, number>();
   let repaired = 0;
+  let autoIdSeq = 0;
 
-  const roomOf = (unitId: string): SpecialRoom | undefined =>
-    input.specialRooms.find(r => r.unitIds.includes(unitId));
+  function tdKey(name: string, day: string): string { return `${name}\0${day}`; }
 
   function addToIndex(a: Assignment) {
     teacherSlotSet.add(`${a.day}-${a.period}-${a.name}`);
     classSlotSet.add(`${a.day}-${a.period}-${a.grade}-${a.classNum}`);
-    const room = roomOf(a.unitId);
+    const room = unitToRoom.get(a.unitId);
     if (room) {
       const k = `${room.id}-${a.day}-${a.period}`;
       roomSlotCount.set(k, (roomSlotCount.get(k) ?? 0) + 1);
     }
+    const tk = tdKey(a.name, a.day);
+    const tArr = tdPeriods.get(tk);
+    if (tArr) tArr.push(a.period); else tdPeriods.set(tk, [a.period]);
+    const ck = `${a.grade}-${a.classNum}-${a.day}`;
+    classDayCount.set(ck, (classDayCount.get(ck) ?? 0) + 1);
+    const sk = `${a.grade}-${a.classNum}-${a.day}-${a.subject}`;
+    classDaySubjectCount.set(sk, (classDaySubjectCount.get(sk) ?? 0) + 1);
+    if (a.period === 1 || a.period === 4) period14Count++;
   }
+
   function removeFromIndex(a: Assignment) {
     teacherSlotSet.delete(`${a.day}-${a.period}-${a.name}`);
     classSlotSet.delete(`${a.day}-${a.period}-${a.grade}-${a.classNum}`);
-    const room = roomOf(a.unitId);
+    const room = unitToRoom.get(a.unitId);
     if (room) {
       const k = `${room.id}-${a.day}-${a.period}`;
       roomSlotCount.set(k, Math.max(0, (roomSlotCount.get(k) ?? 0) - 1));
     }
+    const tk = tdKey(a.name, a.day);
+    const tArr = tdPeriods.get(tk);
+    if (tArr) {
+      const idx = tArr.indexOf(a.period);
+      if (idx !== -1) tArr.splice(idx, 1);
+    }
+    const ck = `${a.grade}-${a.classNum}-${a.day}`;
+    classDayCount.set(ck, Math.max(0, (classDayCount.get(ck) ?? 0) - 1));
+    const sk = `${a.grade}-${a.classNum}-${a.day}-${a.subject}`;
+    const sCnt = (classDaySubjectCount.get(sk) ?? 1) - 1;
+    if (sCnt <= 0) classDaySubjectCount.delete(sk);
+    else classDaySubjectCount.set(sk, sCnt);
+    if (a.period === 1 || a.period === 4) period14Count = Math.max(0, period14Count - 1);
   }
 
   for (const a of working) {
@@ -120,14 +147,30 @@ export function runScheduler(input: SchedulingInput): SchedulingResult {
     addToIndex(a);
   }
 
+  function makeAssignment(unit: TeacherUnit, day: string, period: number): Assignment {
+    return {
+      id: `auto-${++autoIdSeq}`,
+      unitId: unit.id,
+      name: unit.name,
+      subject: unit.subject,
+      grade: unit.grade,
+      classNum: unit.classNum,
+      day,
+      period,
+      color: unit.color,
+      isFixed: false,
+    };
+  }
+
   const inRange = (grade: number, day: string, period: number): boolean =>
     period <= (periodConfig[grade]?.[day] ?? 7);
 
-  const isBlocked = (name: string, day: string, period: number): boolean =>
-    input.blockedSlots.some(b => b.teacherName === name && b.day === day && b.period === period);
-
   /** 교사가 해당 요일에 갖는 교시 목록 (특정 배정 제외 가능) */
   function teacherPeriodsOn(name: string, day: string, excludeId?: string): number[] {
+    if (excludeId === undefined) {
+      return tdPeriods.get(tdKey(name, day)) ?? [];
+    }
+    // 재배치 경로(cold path)만 working 배열 스캔
     return working
       .filter(a => a.name === name && a.day === day && a.id !== excludeId)
       .map(a => a.period);
@@ -137,46 +180,45 @@ export function runScheduler(input: SchedulingInput): SchedulingResult {
   // ★ 4연강은 절대 금지 (교사). 학급 연속 교시는 정상이므로 제약하지 않음.
   function canPlaceHard(d: Desc, day: string, period: number): boolean {
     if (!inRange(d.grade, day, period)) return false;
-    if (isBlocked(d.name, day, period)) return false;
+    if (blockedSet.has(`${day}-${period}-${d.name}`)) return false;
     if (teacherSlotSet.has(`${day}-${period}-${d.name}`)) return false;
     if (classSlotSet.has(`${day}-${period}-${d.grade}-${d.classNum}`)) return false;
-    const room = roomOf(d.unitId);
+    const room = unitToRoom.get(d.unitId);
     if (room && (roomSlotCount.get(`${room.id}-${day}-${period}`) ?? 0) >= room.capacity) return false;
-    if (maxConsecutiveRun([...teacherPeriodsOn(d.name, day), period]) >= 4) return false; // 4연강 금지
+    if (maxConsecutiveRun([...teacherPeriodsOn(d.name, day), period]) >= 4) return false;
     return true;
   }
 
   /** 하드 제약 (특정 배정 1건을 무시하고 검사 — 재배치용, 배열 스캔) */
   function canPlaceHardExcluding(d: Desc, day: string, period: number, excludeId: string): boolean {
     if (!inRange(d.grade, day, period)) return false;
-    if (isBlocked(d.name, day, period)) return false;
+    if (blockedSet.has(`${day}-${period}-${d.name}`)) return false;
     if (working.some(a => a.id !== excludeId && a.day === day && a.period === period && a.name === d.name)) return false;
     if (working.some(a => a.id !== excludeId && a.day === day && a.period === period && a.grade === d.grade && a.classNum === d.classNum)) return false;
-    const room = roomOf(d.unitId);
+    const room = unitToRoom.get(d.unitId);
     if (room) {
       const cnt = working.filter(a => a.id !== excludeId && a.day === day && a.period === period && room.unitIds.includes(a.unitId)).length;
       if (cnt >= room.capacity) return false;
     }
-    if (maxConsecutiveRun([...teacherPeriodsOn(d.name, day, excludeId), period]) >= 4) return false; // 4연강 금지
+    if (maxConsecutiveRun([...teacherPeriodsOn(d.name, day, excludeId), period]) >= 4) return false;
     return true;
   }
 
   // ── 엄격 제약 (교사 3연강 금지) ────────────────────────────────────────────
   function canPlaceStrict(d: Desc, day: string, period: number): boolean {
     if (!canPlaceHard(d, day, period)) return false;
-    if (maxConsecutiveRun([...teacherPeriodsOn(d.name, day), period]) >= 3) return false; // 3연강 금지
+    if (maxConsecutiveRun([...teacherPeriodsOn(d.name, day), period]) >= 3) return false;
     return true;
   }
 
   // ── 슬롯 선호도 점수 ──────────────────────────────────────────────────────
   function scoreSlot(d: Desc, day: string, period: number): number {
     let score = 100;
-    const total14 = working.filter(a => a.period === 1 || a.period === 4).length;
-    const totalOther = working.filter(a => a.period !== 1 && a.period !== 4).length;
-    if ((period === 1 || period === 4) && total14 > totalOther * 0.4) score -= 25;
-    if (working.some(a => a.grade === d.grade && a.classNum === d.classNum && a.day === day && a.subject === d.subject)) score -= 40;
-    const teacherDayLoad = working.filter(a => a.name === d.name && a.day === day).length;
-    const classDayLoad = working.filter(a => a.grade === d.grade && a.classNum === d.classNum && a.day === day).length;
+    const totalOther = working.length - period14Count;
+    if ((period === 1 || period === 4) && period14Count > totalOther * 0.4) score -= 25;
+    if (classDaySubjectCount.has(`${d.grade}-${d.classNum}-${day}-${d.subject}`)) score -= 40;
+    const teacherDayLoad = tdPeriods.get(tdKey(d.name, day))?.length ?? 0;
+    const classDayLoad = classDayCount.get(`${d.grade}-${d.classNum}-${day}`) ?? 0;
     score -= teacherDayLoad * 8;
     score -= classDayLoad * 5;
     if ([2, 3, 5, 6].includes(period)) score += 12;
@@ -220,41 +262,34 @@ export function runScheduler(input: SchedulingInput): SchedulingResult {
   const isElectiveAssignment = (a: Assignment): boolean => electiveUnitIds.has(a.unitId);
 
   // ── 재배치(Repair): 막힌 수업을 위해 기존 비고정 수업을 옆 칸으로 밀어내기 ──
-  // U를 놓을 칸을 찾되, 그 칸을 막고 있는 비고정 수업을 빈 칸으로 이동시켜 자리를 만든다 (깊이 1).
   function tryRepairPlace(unit: TeacherUnit): boolean {
     const d = unitDesc(unit);
     for (const day of DAYS) {
       for (const period of PERIODS) {
         if (!inRange(d.grade, day, period)) continue;
-        if (isBlocked(d.name, day, period)) continue;
+        if (blockedSet.has(`${day}-${period}-${d.name}`)) continue;
 
-        // 이 칸을 막는 충돌 수업들 (교사 충돌 / 학급 충돌)
         const blockers: Assignment[] = [];
         const pushBlocker = (a: Assignment) => { if (!blockers.some(b => b.id === a.id)) blockers.push(a); };
         for (const a of working) {
           if (a.day !== day || a.period !== period) continue;
-          if (a.name === d.name) pushBlocker(a);                                  // 교사 충돌
-          if (a.grade === d.grade && a.classNum === d.classNum) pushBlocker(a);   // 학급 충돌
+          if (a.name === d.name) pushBlocker(a);
+          if (a.grade === d.grade && a.classNum === d.classNum) pushBlocker(a);
         }
 
-        // ★ 특별실 꽉 참 충돌: 같은 특별실을 쓰는 수업을 옮겨 자리 확보
-        const room = roomOf(d.unitId);
+        const room = unitToRoom.get(d.unitId);
         if (room) {
           const occupants = working.filter(a => a.day === day && a.period === period && room.unitIds.includes(a.unitId));
-          const need = occupants.length - room.capacity + 1; // 비워야 하는 칸 수
+          const need = occupants.length - room.capacity + 1;
           if (need > 0) {
-            // 이미 blocker로 잡힌 것 제외하고, 옮길 점유 수업 추가
             const movable = occupants.filter(o => !blockers.some(b => b.id === o.id));
             for (let k = 0; k < need && k < movable.length; k++) pushBlocker(movable[k]);
           }
         }
 
-        // 고정 수업 또는 선택과목(동시배정) 수업이 막고 있으면 이 칸은 포기 (이동 불가)
         if (blockers.some(b => b.isFixed || isElectiveAssignment(b))) continue;
-        // 충돌이 너무 많으면(3건 초과) 깊이1 재배치로는 무리 → 다음 칸
         if (blockers.length > 3) continue;
 
-        // 충돌 수업들을 각각 빈 칸으로 이동 시도
         const moves: { a: Assignment; oldDay: string; oldPeriod: number }[] = [];
         let ok = true;
         for (const b of blockers) {
@@ -264,14 +299,12 @@ export function runScheduler(input: SchedulingInput): SchedulingResult {
           moveAssignment(b, dest.day, dest.period);
         }
 
-        // 이동 후 U를 놓을 수 있는지 최종 확인 (특별실 수용량 등 포함)
         if (ok && canPlaceHard(d, day, period)) {
           recordPlacement(makeAssignment(unit, day, period));
           repaired++;
           return true;
         }
 
-        // 실패 → 이동 롤백
         for (let i = moves.length - 1; i >= 0; i--) {
           moveAssignment(moves[i].a, moves[i].oldDay, moves[i].oldPeriod);
         }
@@ -322,14 +355,13 @@ export function runScheduler(input: SchedulingInput): SchedulingResult {
 
     for (const unit of candidates) {
       if (remaining(unit) <= 0) continue;
-      let slot = findBestSlot(unitDesc(unit), true);  // 1차: 3연강 포함 엄격
-      if (!slot) slot = findBestSlot(unitDesc(unit), false); // 2차: 3연강 완화
+      let slot = findBestSlot(unitDesc(unit), true);
+      if (!slot) slot = findBestSlot(unitDesc(unit), false);
       if (slot) recordPlacement(makeAssignment(unit, slot.day, slot.period));
     }
   }
 
   // ── Phase 3: 재배치 패스 — 남은 '일반' 수업을 기존 비고정 수업 밀어내며 채우기 ──
-  // (선택과목은 동시배정 묶음이 깨질 수 있어 재배치 대상에서 제외)
   for (const unit of regularUnits) {
     let guard = 0;
     while (remaining(unit) > 0 && guard < 50) {
@@ -339,11 +371,10 @@ export function runScheduler(input: SchedulingInput): SchedulingResult {
   }
 
   // ── 최종 잔여 진단 ────────────────────────────────────────────────────────
-  // 학급별/교사별 수용량 사전 계산 (불가능 사유 판별용)
   const classCapacity = (grade: number): number =>
     DAYS.reduce((sum, day) => sum + (periodConfig[grade]?.[day] ?? 7), 0);
 
-  const classDemand = new Map<string, number>(); // `${grade}-${classNum}` → 시수합
+  const classDemand = new Map<string, number>();
   const teacherDemand = new Map<string, number>();
   for (const u of input.units) {
     classDemand.set(`${u.grade}-${u.classNum}`, (classDemand.get(`${u.grade}-${u.classNum}`) ?? 0) + u.totalHours);
@@ -351,7 +382,7 @@ export function runScheduler(input: SchedulingInput): SchedulingResult {
   }
   const teacherCapacity = (name: string): number => {
     const blocked = input.blockedSlots.filter(b => b.teacherName === name).length;
-    return DAYS.length * PERIODS.length - blocked; // 35 - 배정금지
+    return DAYS.length * PERIODS.length - blocked;
   };
 
   for (const unit of input.units) {
@@ -377,14 +408,13 @@ export function runScheduler(input: SchedulingInput): SchedulingResult {
     for (let i = 0; i < rem; i++) failedUnits.push({ unit, reason });
   }
 
-  // ── 3연강 발생 교사 탐지 (4연강은 하드 금지라 발생 불가, 3연강만 집계) ──────
+  // ── 3연강 발생 교사 탐지 ─────────────────────────────────────────────────
   const threeConsecutive: { name: string; day: string; periods: number[] }[] = [];
   const teacherNames = [...new Set(working.map(a => a.name))];
   for (const name of teacherNames) {
     for (const day of DAYS) {
       const periods = working.filter(a => a.name === name && a.day === day).map(a => a.period);
       const sorted = [...new Set(periods)].sort((a, b) => a - b);
-      // 길이 3 이상의 연속 구간 추출
       let run: number[] = [];
       const flush = () => {
         if (run.length >= 3) threeConsecutive.push({ name, day, periods: [...run] });

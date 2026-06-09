@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { TeacherUnit, Assignment, SpecialRoom, ElectiveGroup, BlockedSlot, PeriodConfig, DEFAULT_PERIOD_CONFIG } from '@/app/types';
 import { runScheduler } from '@/lib/schedulingEngine';
 
@@ -173,9 +173,8 @@ export default function DashboardPage({
 
   // ── 자동 배정 ─────────────────────────────────────────────────────────────
   const handleAutoSchedule = () => {
-    const totalRemaining = units.reduce((acc, u) => {
-      return acc + Math.max(0, u.totalHours - assignments.filter(a => a.unitId === u.id).length);
-    }, 0);
+    const totalRemaining = units.reduce((acc, u) =>
+      acc + Math.max(0, u.totalHours - (placedCountMap.get(u.id) ?? 0)), 0);
     if (totalRemaining === 0) { alert('✅ 모든 수업이 배정되었습니다!'); return; }
     if (!confirm(
       `🤖 자동 배정을 실행합니다.\n\n📌 적용 규칙:\n  • 1/4교시 쏠림 방지\n  • 3연강 금지\n  • 선택과목 그룹 동시 배정 (${electiveGroups.length}개)\n  • 특별실 수용량 제한 (${specialRooms.length}개)\n  • 같은 과목 같은 날 중복 회피\n\n배정 대상: 잔여 ${totalRemaining}시수\n계속하시겠습니까?`
@@ -230,7 +229,14 @@ export default function DashboardPage({
     return acc;
   }, {});
 
-  const uniqueTeachers = Array.from(new Set(units.map(u => u.name)));
+  const uniqueTeachers = [...new Set(units.map(u => u.name))];
+
+  // 유닛별 배정 수를 한 번만 계산 (사이드바 filter+map 중복 스캔 방지)
+  const placedCountMap = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const a of assignments) m.set(a.unitId, (m.get(a.unitId) ?? 0) + 1);
+    return m;
+  }, [assignments]);
 
   if (!isMounted) return <div className="text-slate-500 p-4">데이터 동기화 중...</div>;
 
@@ -258,11 +264,10 @@ export default function DashboardPage({
                 const matchesView = viewMode === 'CLASS'
                   ? unit.grade === selectedGrade && unit.classNum === selectedClass
                   : unit.name === selectedTeacher;
-                const remaining = unit.totalHours - assignments.filter(a => a.unitId === unit.id).length;
-                return matchesView && remaining > 0;
+                return matchesView && unit.totalHours - (placedCountMap.get(unit.id) ?? 0) > 0;
               })
               .map(unit => {
-                const remaining = unit.totalHours - assignments.filter(a => a.unitId === unit.id).length;
+                const remaining = unit.totalHours - (placedCountMap.get(unit.id) ?? 0);
                 return (
                   <div
                     key={unit.id}
